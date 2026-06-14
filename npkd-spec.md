@@ -1,6 +1,7 @@
 # `.npkd` File Format Specification
 
-**Version:** 1  
+**Manifest version:** 1  
+**Document version:** 2 (multi-page; version 1 files are still readable — see §3.3)  
 **Application:** Napukin (openNapkin)
 
 ---
@@ -13,10 +14,15 @@ A `.npkd` file is a **ZIP archive using STORE compression** (no deflation). It c
 ├── manifest.json       (required)
 ├── document.json       (required)
 ├── thumbnail.png       (optional)
-└── assets/             (required, may be empty)
-    ├── <id>.png
-    ├── <id>.jpg
-    └── ...
+├── assets/             (required, may be empty)
+│   ├── <id>.png
+│   ├── <id>.jpg
+│   └── ...
+└── kits/               (optional — embedded UI kits, see §12)
+    └── <kitId>/
+        ├── manifest.json
+        ├── components/<componentId>.json
+        └── assets/<assetId>.<ext>
 ```
 
 The STORE compression mode means files are stored uncompressed inside the ZIP. This keeps the format simple and makes the JSON contents accessible to tools that can parse ZIP entries without decompression.
@@ -49,16 +55,32 @@ The MIME type is `application/zip`. The file extension is `.npkd`.
 
 ### Top-Level Structure
 
+A document is **multi-page** (format version 2). Each page owns its own artboard
+size/fill, layers, and comments; assets are shared across the whole document.
+
 ```json
 {
   "name": "My Design",
-  "version": 1,
+  "version": 2,
+  "canvasBackground": "#2c2c2c",
+  "activePageId": "el_m1a2b3c_1",
+  "pages": [
+    {
+      "id": "el_m1a2b3c_1",
+      "name": "Page 1",
+      "artboardWidth": 393,
+      "artboardHeight": 852,
+      "artboardFill": true,
+      "artboardFillColor": "#ffffff",
+      "layers": [],
+      "comments": []
+    }
+  ],
   "artboardWidth": 393,
   "artboardHeight": 852,
   "artboardFill": true,
   "artboardFillColor": "#ffffff",
-  "layers": [],
-  "comments": [],
+  "usedKits": [],
   "assetManifest": []
 }
 ```
@@ -66,14 +88,58 @@ The MIME type is `application/zip`. The file extension is `.npkd`.
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Document name (matches manifest) |
-| `version` | integer | Format version, currently `1` |
-| `artboardWidth` | number | Artboard width in pixels |
-| `artboardHeight` | number | Artboard height in pixels |
-| `artboardFill` | boolean | Whether the artboard has a background fill (default `true`) |
-| `artboardFillColor` | string | Artboard background color as hex string (default `"#ffffff"`) |
-| `layers` | array | Ordered list of layer objects (bottom to top) |
-| `comments` | array | List of comment objects |
-| `assetManifest` | array | Reserved for future use, currently `[]` |
+| `version` | integer | Document format version, currently `2` (multi-page) |
+| `canvasBackground` | string | Color of the canvas area outside the artboard, as hex string (default `"#2c2c2c"`) |
+| `activePageId` | string | `id` of the page that was active when the file was saved |
+| `pages` | array | Ordered list of page objects (see §3.1) |
+| `artboardWidth` | number | Active page's artboard width, mirrored at the top level for backward compatibility (see §3.2) |
+| `artboardHeight` | number | Active page's artboard height, mirrored at the top level |
+| `artboardFill` | boolean | Active page's artboard fill flag, mirrored at the top level |
+| `artboardFillColor` | string | Active page's artboard background color, mirrored at the top level |
+| `usedKits` | array | Summary of UI kits referenced by component instances across all pages: `[{ id, name, kitVersion }]` (derived from layers; optional) |
+| `assetManifest` | array | Summary of embedded assets: `[{ id, name, type }]` (derived from referenced assets; optional) |
+
+### 3.1 Pages
+
+Each entry in the `pages` array is a page object:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `id` | string | — | Unique page ID (same format as layer IDs, see §5) |
+| `name` | string | `"Page N"` | Human-readable page name |
+| `artboardWidth` | number | 393 | Page artboard width in pixels |
+| `artboardHeight` | number | 852 | Page artboard height in pixels |
+| `artboardFill` | boolean | `true` | Whether the page artboard has a background fill |
+| `artboardFillColor` | string | `"#ffffff"` | Page artboard background color as hex string |
+| `layers` | array | `[]` | Ordered list of layer objects for this page (bottom to top) |
+| `comments` | array | `[]` | List of comment objects for this page |
+
+Rules:
+
+- A document always has **at least one page**; the last page cannot be deleted.
+- `activePageId` should match one of the pages' `id`s. If it's missing or
+  doesn't match, readers fall back to the first page.
+- Layer IDs must be unique **across the whole document**, not just within a page.
+
+### 3.2 Top-level artboard mirror
+
+For backward compatibility with tooling that expects a single artboard, the
+**active page's** `artboardWidth`, `artboardHeight`, `artboardFill`, and
+`artboardFillColor` are also written at the top level of `document.json`. These
+top-level fields are a read-only mirror — the authoritative values live on each
+page object. Writers should keep them in sync with the active page; readers that
+support pages should ignore them in favor of the per-page values.
+
+### 3.3 Versioning & backward compatibility
+
+- **Version 2** (current): multi-page documents with a `pages` array and
+  `activePageId`. Layers and comments live inside each page object.
+- **Version 1** (legacy): a single artboard with top-level `layers` and
+  `comments` arrays and no `pages`. Readers should detect a missing/empty
+  `pages` array and migrate the document into a single page named `"Page 1"`,
+  using the top-level `artboardWidth`/`artboardHeight`/`artboardFill`/
+  `artboardFillColor` and `layers`/`comments`. Napukin performs this migration
+  automatically on open.
 
 ### Standard Artboard Sizes
 
@@ -162,6 +228,7 @@ The default shape. Used for buttons, cards, containers, input fields, background
 
 - `cornerRadius` rounds all four corners equally, clamped to half the smaller dimension.
 - For a pill/capsule shape, set `cornerRadius` to half the `height`.
+- `cornerRadii` (optional object `{ tl, tr, br, bl }`) overrides `cornerRadius` per corner, enabling independent corner radii. When all four values are equal, writers should omit `cornerRadii` and use the uniform `cornerRadius` instead. Any corner missing from the object falls back to `cornerRadius`.
 
 Optional cover image properties:
 
@@ -244,7 +311,9 @@ Additional properties:
 | `fontSize` | number | 16 | Font size in pixels |
 | `fontFamily` | string | `"Roboto, sans-serif"` | Font family |
 | `fontWeight` | string | `"normal"` | `"normal"`, `"bold"`, or `"100"`–`"900"` |
-| `textAlign` | string | `"left"` | `"left"`, `"center"`, or `"right"` |
+| `textAlign` | string | `"left"` | `"left"`, `"center"`, or `"right"` (horizontal alignment) |
+| `lineHeight` | number | `round(fontSize × 1.3)` | Line height in **pixels** (same unit as `fontSize`) |
+| `verticalAlign` | string | `"middle"` | Vertical alignment within the layer box: `"top"`, `"middle"`, or `"bottom"` |
 
 **Available font families:**
 - `"Roboto, sans-serif"` (default)
@@ -262,8 +331,12 @@ Any CSS font-family string is accepted in the format; the above are the fonts bu
 - `fill` is the **text color** (not a background — default `"#000000"`).
 - `stroke` must be `"transparent"` and `strokeWidth` must be `0`.
 - Text wraps within the layer's `width`.
-- Line height is `fontSize × 1.3`.
-- Layer `height` should be approximately `(number of lines) × fontSize × 1.3`.
+- Each line occupies `lineHeight` pixels (a CSS-style line box). When
+  `lineHeight` is absent, fall back to `fontSize × 1.3`.
+- `verticalAlign` positions the block of wrapped lines within the layer's
+  `height`: `"top"` aligns to the top edge, `"middle"` centers it, `"bottom"`
+  aligns to the bottom edge.
+- Layer `height` should be approximately `(number of lines) × lineHeight`.
 
 ### 6.10 Path
 
@@ -330,6 +403,25 @@ Additional properties:
 - **Children use absolute world coordinates**, not positions relative to the group.
 - Groups can be nested.
 
+**Component instances:**
+
+A group inserted from a UI kit (see `ndkit-spec.md`) carries an optional
+`component` property:
+
+```json
+"component": {
+  "kitId": "napkin-essentials",
+  "kitName": "Napukin Essentials",
+  "kitVersion": "1.0.0",
+  "componentId": "button-primary",
+  "state": "default"
+}
+```
+
+Readers that don't understand kits can ignore this property — the group
+renders like any other group. The editor uses it to show the component's
+state switcher and to track which kits a document uses.
+
 ---
 
 ## 7. Layer Ordering
@@ -388,7 +480,9 @@ The thumbnail is optional — readers should not depend on it being present. It'
 
 1. Open the file as a ZIP archive.
 2. Parse `manifest.json` — verify `app === "Napukin"` and check `version`.
-3. Parse `document.json` — read artboard dimensions, iterate layers.
+3. Parse `document.json`. If `pages` is present (version 2), iterate each page's
+   artboard, layers, and comments. If `pages` is absent (version 1), treat the
+   top-level artboard fields, `layers`, and `comments` as a single page (see §3.3).
 4. Load assets from the `assets/` folder as needed (match by `assetId`).
 5. Optionally read `thumbnail.png` for preview display.
 
@@ -406,9 +500,46 @@ The thumbnail is optional — readers should not depend on it being present. It'
 Since the format is JSON inside an uncompressed ZIP, any language with a ZIP library can produce valid `.npkd` files. The minimum viable file contains:
 
 - `manifest.json` with `app`, `version`, `name`, and `createdAt`
-- `document.json` with `name`, `version`, `artboardWidth`, `artboardHeight`, `layers` (can be `[]`), `comments` (`[]`), and `assetManifest` (`[]`)
+- `document.json` with `name`, `version: 2`, `activePageId`, and a `pages` array
+  containing at least one page (`id`, `name`, `artboardWidth`, `artboardHeight`,
+  `layers` can be `[]`, `comments` can be `[]`). The top-level artboard mirror
+  (§3.2) and `assetManifest` (`[]`) are recommended for compatibility.
 - An empty `assets/` folder
 
 ### Known Consumers
 
 - **Napukin** (openNapkin) — the primary editor
+- **Gemini Gem** — an AI prompt that generates `.npkd` JSON from natural language (see [gemini-gem-npkd.md](gemini-gem-npkd.md))
+
+---
+
+## 12. Embedded UI Kits (`kits/`)
+
+When a document contains component instances from UI kits (`.ndkit` files —
+see [ndkit-spec.md](ndkit-spec.md)), the editor embeds the **used** component
+definitions into the document on save, so the file stays portable: opening it
+on a host that doesn't serve the kit still shows the kit under "In use in
+this file" in the Assets tab and keeps state switching working.
+
+```
+kits/
+└── <kitId>/
+    ├── manifest.json               — ndkit manifest, components[] limited to used ones
+    ├── components/
+    │   └── <componentId>.json      — only components used by this document
+    └── assets/
+        └── <namespacedAssetId>.<ext>
+```
+
+Rules:
+
+- Only components actually referenced by a layer's `component` metadata are
+  embedded, along with only the assets those components' states reference.
+- Embedded kit assets are stored under their **namespaced IDs**
+  (`kit_<kitId>_<assetId>`) — the same IDs the component trees reference and
+  the same IDs used in the document's own `assets/` folder for inserted
+  instances.
+- Component state trees inside an embedded kit already use namespaced asset
+  references (unlike a standalone `.ndkit`, which uses bare asset IDs).
+- The `kits/` folder is optional. Readers that don't support kits can ignore
+  it entirely; component instances are plain groups.

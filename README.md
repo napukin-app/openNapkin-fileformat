@@ -35,6 +35,7 @@ MyDesign.npkd (ZIP archive, STORE/no compression)
 | Document | Description |
 |----------|-------------|
 | [npkd-spec.md](npkd-spec.md) | Full technical specification — file structure, JSON schemas, layer types, coordinate system, rendering rules |
+| [ndkit-spec.md](ndkit-spec.md) | `.ndkit` design kit (UI component library) specification — kit packaging, component states, and how kits embed into `.npkd` documents |
 
 ## Quick Start
 
