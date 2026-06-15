@@ -509,7 +509,7 @@ Since the format is JSON inside an uncompressed ZIP, any language with a ZIP lib
 ### Known Consumers
 
 - **Napukin** (openNapkin) — the primary editor
-- **Gemini Gem** — an AI prompt that generates `.npkd` JSON from natural language (see [gemini-gem-npkd.md](gemini-gem-npkd.md))
+- **Gemini Gem** — an AI prompt that generates `.npkd` JSON from natural language
 
 ---
 
